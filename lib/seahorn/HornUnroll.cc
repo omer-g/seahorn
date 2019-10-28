@@ -54,6 +54,18 @@ class UnrollWtoVisitor : public WtoElementVisitor<Expr> {
   std::vector<unsigned> m_boundStack;
 
 public:
+  // EDIT
+  exp_to_vexp_t getRel2Unrolled() { return m_rel2unrolled; }
+  // Can be called from duplicateRule to avoid duplication
+  Expr getDst(HornRule &rule) {
+    return bind::fname(rule.head());
+  }
+  Expr getSrc(HornRule &rule) {
+    return (rule.body()->arity() == 2) ? bind::fname(rule.body()->left())
+                                           : bind::fname(rule.body());
+  }
+  // END EDIT
+
   UnrollWtoVisitor(unsigned nBound, HornClauseDB &db, HornClauseDB &u_db,
                    bool bStrict)
       : m_nBound(nBound), m_db(db), m_unrolledDB(u_db), m_bStrict(bStrict) {
@@ -235,11 +247,22 @@ void HornUnroll::unroll(unsigned nBound, HornifyModule &hm, HornClauseDB &db) {
     wto_it++;
   }
 
+
   // XXX TODO:
   // Need to make sure that queries are not unrolled as well
   for (Expr q : db.getQueries()) {
     m_pUnrolledDB->addQuery(q);
   }
+
+  // EDIT
+  auto original_relations = db.getRelations();
+  auto rel_2_unrolled = v.getRel2Unrolled();
+
+  // END EDIT
+
+
+
+
 }
 
 void HornUnrollPass::unroll() {
