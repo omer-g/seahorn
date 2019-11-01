@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <vector>
+#include "boost/unordered_map.hpp"
 
 namespace seahorn {
 using namespace llvm;
@@ -31,6 +32,8 @@ public:
   virtual ~HornUnroll() {}
 
   void unroll(unsigned nBound, HornifyModule &hm, HornClauseDB &db);
+
+  boost::unordered_map<Expr, std::vector<std::vector<Expr>>> rel_2_unrolled;
 
 private:
   bool m_bStrict;

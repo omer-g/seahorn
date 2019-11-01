@@ -11,6 +11,7 @@
 #include <fstream>
 #include <utility>
 #include <vector>
+#include <set>
 
 #include "boost/unordered_map.hpp"
 #include <boost/lexical_cast.hpp>
@@ -57,10 +58,10 @@ public:
   // EDIT
   exp_to_vexp_t getRel2Unrolled() { return m_rel2unrolled; }
   // Can be called from duplicateRule to avoid duplication
-  Expr getDst(HornRule &rule) {
+  static Expr getDst(HornRule &rule) {
     return bind::fname(rule.head());
   }
-  Expr getSrc(HornRule &rule) {
+  static Expr getSrc(HornRule &rule) {
     return (rule.body()->arity() == 2) ? bind::fname(rule.body()->left())
                                            : bind::fname(rule.body());
   }
@@ -255,13 +256,9 @@ void HornUnroll::unroll(unsigned nBound, HornifyModule &hm, HornClauseDB &db) {
   }
 
   // EDIT
-  auto original_relations = db.getRelations();
-  auto rel_2_unrolled = v.getRel2Unrolled();
+  rel_2_unrolled = v.getRel2Unrolled();
 
   // END EDIT
-
-
-
 
 }
 
@@ -307,6 +304,65 @@ bool HornUnrollPass::runOnModule(Module &M) {
 
   // MUST DO THIS, delete causes it to crash
   // m_pUnrolledDB = NULL;
+
+  // EDIT
+  HornClauseDB &db = hm.getHornClauseDB();
+  auto original_rules = db.getRules();
+
+  outs() << "After getRules()";
+  std::set<Expr> dst_predicates;
+  std::set<Expr> src_predicates;
+  std::set<Expr> predicates_intersection;
+  for (auto &rel: original_rules){
+    dst_predicates.insert(UnrollWtoVisitor::getDst(rel));
+    src_predicates.insert(UnrollWtoVisitor::getSrc(rel));
+  }
+  outs() << "After dst src";
+
+  // Intersection
+  for (auto &pred: dst_predicates){
+    if (src_predicates.count(pred)){
+      predicates_intersection.insert(pred);
+    }  
+  }
+  
+  if (predicates_intersection.size()==0){
+    outs() << "No recursive predicates.";
+    return false;
+  }
+ 
+  Expr P = *predicates_intersection.begin();
+
+  for (auto V: m_HornUnroll.rel_2_unrolled[P]){
+    if (V.size() < 2){
+      continue;
+    }
+    std::vector<Expr> delta_covers;
+
+
+    typedef std::vector<boost::intrusive_ptr<expr::ENode> >::iterator it_type;
+    // Create OR Expr out of all elements other than last
+    Expr neg_or = mk<NEG>(mknary<OR>(V.begin(), V.end() - 1));
+
+    Expr last_formula = V.back();
+    Expr and_formula = boolop::land(last_formula, neg_or);
+    
+    // simpler:
+    // boolop::limp(last_formula, or_formula);
+
+    
+
+
+  }
+
+  outs() << "END OF PROGRAM\n";
+
+  // END EDIT
+
+
+
+
+
 
   return false;
 }
