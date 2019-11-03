@@ -294,13 +294,20 @@ bool HornUnrollPass::runOnModule(Module &M) {
   std::ofstream unrolledSmtFile(fileName);
   unrolledSmtFile << fp << "\n";
   unrolledSmtFile.close();
+  outs() << "\n------------------------START-----------------\n";
   outs() << "Printed file\n";
 
-  /*boost::tribool res = fp.query ();
-  if (res) outs () << "sat";
-  else if (!res) outs () << "unsat";
+  boost::tribool res = fp.query ();
+  if (res){
+    outs () << "SAT - Program is not safe";
+    return false;
+  }
+  else if (!res){
+    outs () << "Program UNSAT with bound: " << m_nBound << "\n" <<
+      "Looking for inductive invariant:";
+  }
   else outs () << "unknown";
-  outs () << "\n";*/
+  outs () << "\n";
 
   // MUST DO THIS, delete causes it to crash
   // m_pUnrolledDB = NULL;
@@ -309,7 +316,6 @@ bool HornUnrollPass::runOnModule(Module &M) {
   HornClauseDB &db = hm.getHornClauseDB();
   auto original_rules = db.getRules();
 
-  outs() << "After getRules()";
   std::set<Expr> dst_predicates;
   std::set<Expr> src_predicates;
   std::set<Expr> predicates_intersection;
@@ -317,9 +323,8 @@ bool HornUnrollPass::runOnModule(Module &M) {
     dst_predicates.insert(UnrollWtoVisitor::getDst(rel));
     src_predicates.insert(UnrollWtoVisitor::getSrc(rel));
   }
-  outs() << "After dst src";
 
-  // Intersection
+  // Intersection of destination and source predicates
   for (auto &pred: dst_predicates){
     if (src_predicates.count(pred)){
       predicates_intersection.insert(pred);
@@ -327,35 +332,55 @@ bool HornUnrollPass::runOnModule(Module &M) {
   }
   
   if (predicates_intersection.size()==0){
-    outs() << "No recursive predicates.";
+    outs() << "No recursive predicates - nothing to check.\n";
     return false;
   }
  
+  // Get a recursive predicate
   Expr P = *predicates_intersection.begin();
 
+  auto unrolled_P = m_HornUnroll.rel_2_unrolled[P];
+  outs() << "\nunrolled_P.size() = " << unrolled_P.size() << "\n";
   for (auto V: m_HornUnroll.rel_2_unrolled[P]){
+    outs() << "V.size(): " << V.size() << "\n";
+
     if (V.size() < 2){
+      outs() << "Just one F_i formula - go on\n";
       continue;
     }
-    std::vector<Expr> delta_covers;
 
+    std::vector<Expr> covers;
+    for (auto expr: V){
+      covers.push_back(fp.getCoverDelta(op::bind::fapp(expr)));
+    }
 
-    typedef std::vector<boost::intrusive_ptr<expr::ENode> >::iterator it_type;
     // Create OR Expr out of all elements other than last
-    Expr neg_or = mk<NEG>(mknary<OR>(V.begin(), V.end() - 1));
-
-    Expr last_formula = V.back();
+    Expr neg_or = mk<NEG>(mknary<OR>(covers.begin(), covers.end() - 1));
+    Expr last_formula = covers.back();
     Expr and_formula = boolop::land(last_formula, neg_or);
     
-    // simpler:
-    // boolop::limp(last_formula, or_formula);
-
+    outs() << "Solve formula for closeness here - UNSAT means inductive invariant found\n";
     
+    // TODO Probably wrong - check simpler way to solve the expression
+    const ExprVector range = udb.getVars();
+    HornClauseDB tmpDB = HornClauseDB(db.getExprFactory());
+    tmpDB.registerRelation(and_formula);
+    const HornRule new_rule(range, and_formula);
+    tmpDB.addRule(new_rule);
 
-
+    tmpDB.loadZFixedPoint(fp, true, false);
+    boost::tribool res1 = fp.query();
+    
+    if (res1) outs () << "SAT - no inductive invariant found so far";
+    else if (!res1){
+      outs () << "UNSAT - inductive invariant found";
+      return false;
+    }
+    else outs () << "unknown";
+    outs () << "\n";
   }
 
-  outs() << "END OF PROGRAM\n";
+  outs() << "\n-----------------------END--------------------\n";
 
   // END EDIT
 
