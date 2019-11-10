@@ -56,7 +56,7 @@ class UnrollWtoVisitor : public WtoElementVisitor<Expr> {
 
 public:
   // EDIT
-  exp_to_vexp_t getRel2Unrolled() { return m_rel2unrolled; }
+  exp_to_vexp_t &getRel2Unrolled() { return m_rel2unrolled; } // TODO check - now reference. if copy is ok
   // Can be called from duplicateRule to avoid duplication
   static Expr getDst(HornRule &rule) {
     return bind::fname(rule.head());
@@ -339,10 +339,13 @@ bool HornUnrollPass::runOnModule(Module &M) {
   // Get a recursive predicate
   Expr P = *predicates_intersection.begin();
 
+  // Here we go over the relevant unrolled predicates of P, create an
+  // expression for closeness formula of potential inductive invariant,
+  // and pass it to solver. If UNSAT then inductive invariant found.
   auto unrolled_P = m_HornUnroll.rel_2_unrolled[P];
   outs() << "\nunrolled_P.size() = " << unrolled_P.size() << "\n";
   for (auto V: m_HornUnroll.rel_2_unrolled[P]){
-    outs() << "V.size(): " << V.size() << "\n";
+    outs() << "V.size(): " << V.size() << " V.begin(): " << *V.begin() << "\n";
 
     if (V.size() < 2){
       outs() << "Just one F_i formula - go on\n";
