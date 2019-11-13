@@ -319,12 +319,9 @@ bool HornUnrollPass::runOnModule(Module &M) {
   std::set<Expr> dst_predicates;
   std::set<Expr> src_predicates;
   std::set<Expr> predicates_intersection;
-  std::set<Expr> predicates_union;
   for (auto &rel: original_rules){
     dst_predicates.insert(UnrollWtoVisitor::getDst(rel));
     src_predicates.insert(UnrollWtoVisitor::getSrc(rel));
-    predicates_union.insert(UnrollWtoVisitor::getDst(rel));
-    predicates_union.insert(UnrollWtoVisitor::getSrc(rel));
   }
 
   // Intersection of destination and source predicates
@@ -370,42 +367,42 @@ bool HornUnrollPass::runOnModule(Module &M) {
 
       std::vector<Expr> covers;
       for (auto expr: V){
-        outs() << "getting covers:\n";
-        outs() << "isFdecl: " << bind::isFdecl(expr) << "\n";
         Expr func_app = bind::fapp(expr, predicate_args);
         covers.push_back(fp.getCoverDelta(func_app));
-        outs() << "After push a delta cover\n";
       }
 
-      outs() << "I am here, after delta covers\n";
-      // Create OR Expr out of all elements other than last
 
+      // Create inductive invariant formula
+
+      Expr last_formula = covers.back();
+
+      // Initial formula attempt:
+      
       // Expr neg_or = mk<NEG>(mknary<OR>(covers.begin(), covers.end() - 1));
-      // Expr last_formula = covers.back();
       // Expr and_formula = boolop::land(last_formula, neg_or);
-      
-      outs() << "Solve formula for closeness here - UNSAT means inductive invariant found\n";
-      
-      // TODO See example in BMC.h
 
-      // boost::tribool res1 = fp.query();
+      // New closeness formula:
+      Expr neg_last = mk<NEG>(last_formula);
+      Expr f_i_or = mknary<OR>(covers.begin(), covers.end() - 1);
+      Expr disjunct = mk<OR>(neg_last, f_i_or);
+      Expr neg_disjunct = mk<NEG>(disjunct);
+
+      outs() << "Solve formula for closeness here:\n";
       
-      // if (res1) outs () << "SAT - no inductive invariant found so far";
-      // else if (!res1){
-      //   outs () << "UNSAT - inductive invariant found";
-      //   return false;
-      // }
-      // else outs () << "unknown";
-      outs () << "\nEnd for iteration\n";
+      ufo::ZSolver<ufo::EZ3> smt_solver(hm.getZContext());
+      smt_solver.assertExpr(neg_disjunct);
+      boost::tribool res1 = smt_solver.solve();     
+      if (res1) outs () << "Negation of inductive invariance SAT - didn't find invariant so far\n";
+      else if (!res1){
+        outs () << "Negation of inductive invariance UNSAT - found invariant\n";
+        return false;
+      }
+      else outs () << "unknown";
     }
   }
   outs() << "\n-----------------------END--------------------\n";
 
   // END EDIT
-
-
-
-
 
 
   return false;
