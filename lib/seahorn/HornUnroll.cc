@@ -299,7 +299,7 @@ bool HornUnrollPass::runOnModule(Module &M) {
 
   boost::tribool res = fp.query ();
   if (res){
-    outs () << "SAT - Program is not safe";
+    outs () << "SAT - Program is not safe\n";
     return false;
   }
   else if (!res){
@@ -319,9 +319,12 @@ bool HornUnrollPass::runOnModule(Module &M) {
   std::set<Expr> dst_predicates;
   std::set<Expr> src_predicates;
   std::set<Expr> predicates_intersection;
+  std::set<Expr> predicates_union;
   for (auto &rel: original_rules){
     dst_predicates.insert(UnrollWtoVisitor::getDst(rel));
     src_predicates.insert(UnrollWtoVisitor::getSrc(rel));
+    predicates_union.insert(UnrollWtoVisitor::getDst(rel));
+    predicates_union.insert(UnrollWtoVisitor::getSrc(rel));
   }
 
   // Intersection of destination and source predicates
@@ -337,52 +340,65 @@ bool HornUnrollPass::runOnModule(Module &M) {
   }
  
   // Get a recursive predicate
-  Expr P = *predicates_intersection.begin();
+  // Expr P = *predicates_intersection.begin();
 
-  // Here we go over the relevant unrolled predicates of P, create an
-  // expression for closeness formula of potential inductive invariant,
-  // and pass it to solver. If UNSAT then inductive invariant found.
-  auto unrolled_P = m_HornUnroll.rel_2_unrolled[P];
-  outs() << "\nunrolled_P.size() = " << unrolled_P.size() << "\n";
-  for (auto V: m_HornUnroll.rel_2_unrolled[P]){
-    outs() << "V.size(): " << V.size() << " V.begin(): " << *V.begin() << "\n";
+  for (auto &P: predicates_intersection){
+    // Go over all predicates (can optimize later to find a P the unrolls multiple times) 
 
-    if (V.size() < 2){
-      outs() << "Just one F_i formula - go on\n";
-      continue;
+    // Here we go over the relevant unrolled predicates of P, create an
+    // expression for closeness formula of potential inductive invariant,
+    // and pass it to solver. If UNSAT then inductive invariant found.
+    auto unrolled_P = m_HornUnroll.rel_2_unrolled[P];
+    outs() << "\nunrolled_P.size() = " << unrolled_P.size() << "\n";
+    for (auto V: m_HornUnroll.rel_2_unrolled[P]){
+      outs() << "V.size(): " << V.size() << " V.begin(): " << *V.begin() << "\n";
+
+      if (V.size() < 2){
+        outs() << "Just one F_i formula - go on\n";
+        continue;
+      }
+
+      ExprVector predicate_args;
+      // Get arguments from original recursive predicate
+      for (int i=0; i< bind::domainSz(P); i++){
+        Expr X = mkTerm<std::string> ("X", P->efac());
+        Expr arg_i_type = bind::domainTy(P, i);
+        // Expr var = bind::fapp(bind::bvar(i, arg_i_type), arg_i_type);
+        Expr var = bind::fapp(bind::constDecl(variant::variant(i, X), arg_i_type));
+        predicate_args.push_back(var);
+      }
+
+      std::vector<Expr> covers;
+      for (auto expr: V){
+        outs() << "getting covers:\n";
+        outs() << "isFdecl: " << bind::isFdecl(expr) << "\n";
+        Expr func_app = bind::fapp(expr, predicate_args);
+        covers.push_back(fp.getCoverDelta(func_app));
+        outs() << "After push a delta cover\n";
+      }
+
+      outs() << "I am here, after delta covers\n";
+      // Create OR Expr out of all elements other than last
+
+      // Expr neg_or = mk<NEG>(mknary<OR>(covers.begin(), covers.end() - 1));
+      // Expr last_formula = covers.back();
+      // Expr and_formula = boolop::land(last_formula, neg_or);
+      
+      outs() << "Solve formula for closeness here - UNSAT means inductive invariant found\n";
+      
+      // TODO See example in BMC.h
+
+      // boost::tribool res1 = fp.query();
+      
+      // if (res1) outs () << "SAT - no inductive invariant found so far";
+      // else if (!res1){
+      //   outs () << "UNSAT - inductive invariant found";
+      //   return false;
+      // }
+      // else outs () << "unknown";
+      outs () << "\nEnd for iteration\n";
     }
-
-    std::vector<Expr> covers;
-    for (auto expr: V){
-      covers.push_back(fp.getCoverDelta(op::bind::fapp(expr)));
-    }
-
-    // Create OR Expr out of all elements other than last
-    Expr neg_or = mk<NEG>(mknary<OR>(covers.begin(), covers.end() - 1));
-    Expr last_formula = covers.back();
-    Expr and_formula = boolop::land(last_formula, neg_or);
-    
-    outs() << "Solve formula for closeness here - UNSAT means inductive invariant found\n";
-    
-    // TODO Probably wrong - check simpler way to solve the expression
-    const ExprVector range = udb.getVars();
-    HornClauseDB tmpDB = HornClauseDB(db.getExprFactory());
-    tmpDB.registerRelation(and_formula);
-    const HornRule new_rule(range, and_formula);
-    tmpDB.addRule(new_rule);
-
-    tmpDB.loadZFixedPoint(fp, true, false);
-    boost::tribool res1 = fp.query();
-    
-    if (res1) outs () << "SAT - no inductive invariant found so far";
-    else if (!res1){
-      outs () << "UNSAT - inductive invariant found";
-      return false;
-    }
-    else outs () << "unknown";
-    outs () << "\n";
   }
-
   outs() << "\n-----------------------END--------------------\n";
 
   // END EDIT
