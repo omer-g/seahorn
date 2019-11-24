@@ -324,7 +324,7 @@ bool HornUnrollPass::runOnModule(Module &M) {
     src_predicates.insert(UnrollWtoVisitor::getSrc(rel));
   }
 
-  // Intersection of destination and source predicates
+  // Intersection of destination and source predicates - these are recursive
   for (auto &pred: dst_predicates){
     if (src_predicates.count(pred)){
       predicates_intersection.insert(pred);
@@ -336,19 +336,17 @@ bool HornUnrollPass::runOnModule(Module &M) {
     return false;
   }
  
-  // Get a recursive predicate
-  // Expr P = *predicates_intersection.begin();
 
+  // Go over all recursive predicates 
   for (auto &P: predicates_intersection){
-    // Go over all predicates (can optimize later to find a P the unrolls multiple times) 
 
-    // Here we go over the relevant unrolled predicates of P, create an
-    // expression for closeness formula of potential inductive invariant,
-    // and pass it to solver. If UNSAT then inductive invariant found.
+    // Go over the unrolled predicates of P, create an expression to check
+    // for closeness property of a potential inductive invariant,
+    // and pass it to a solver. If UNSAT then inductive invariant found.
     auto unrolled_P = m_HornUnroll.rel_2_unrolled[P];
     outs() << "\nunrolled_P.size() = " << unrolled_P.size() << "\n";
     for (auto V: m_HornUnroll.rel_2_unrolled[P]){
-      outs() << "V.size(): " << V.size() << " V.begin(): " << *V.begin() << "\n";
+      outs() << "Unrolled predicates of P: " << V.size() << "\n";
 
       if (V.size() < 2){
         outs() << "Just one F_i formula - go on\n";
@@ -358,10 +356,8 @@ bool HornUnrollPass::runOnModule(Module &M) {
       ExprVector predicate_args;
       // Get arguments from original recursive predicate
       for (int i=0; i< bind::domainSz(P); i++){
-        Expr X = mkTerm<std::string> ("X", P->efac());
         Expr arg_i_type = bind::domainTy(P, i);
-        // Expr var = bind::fapp(bind::bvar(i, arg_i_type), arg_i_type);
-        Expr var = bind::fapp(bind::constDecl(variant::variant(i, X), arg_i_type));
+        Expr var = bind::bvar(i, arg_i_type);
         predicate_args.push_back(var);
       }
 
@@ -371,27 +367,32 @@ bool HornUnrollPass::runOnModule(Module &M) {
         covers.push_back(fp.getCoverDelta(func_app));
       }
 
-
       // Create inductive invariant formula
 
       Expr last_formula = covers.back();
 
-      // Initial formula attempt:
+      // Initial formula:
       
       // Expr neg_or = mk<NEG>(mknary<OR>(covers.begin(), covers.end() - 1));
       // Expr and_formula = boolop::land(last_formula, neg_or);
 
-      // New closeness formula:
+
+      // The closeness formula is: f_n -> OR(f_1, ... , f_{n-1})
+      // If the negation of this formula is UNSAT then the closeness
+      // formula is always satisfiable.
+
+      // Equivalent new formula:
+      // NOT((f_1 OR f_2 OR ... f_{n-1}) OR NOT(f_n))
+
       Expr neg_last = mk<NEG>(last_formula);
       Expr f_i_or = mknary<OR>(covers.begin(), covers.end() - 1);
-      Expr disjunct = mk<OR>(neg_last, f_i_or);
+      Expr disjunct = mk<OR>(f_i_or, neg_last);
       Expr neg_disjunct = mk<NEG>(disjunct);
 
       outs() << "Solve formula for closeness here:\n";
-      
       ufo::ZSolver<ufo::EZ3> smt_solver(hm.getZContext());
       smt_solver.assertExpr(neg_disjunct);
-      boost::tribool res1 = smt_solver.solve();     
+      boost::tribool res1 = smt_solver.solve();
       if (res1) outs () << "Negation of inductive invariance SAT - didn't find invariant so far\n";
       else if (!res1){
         outs () << "Negation of inductive invariance UNSAT - found invariant\n";
@@ -403,7 +404,6 @@ bool HornUnrollPass::runOnModule(Module &M) {
   outs() << "\n-----------------------END--------------------\n";
 
   // END EDIT
-
 
   return false;
 }
